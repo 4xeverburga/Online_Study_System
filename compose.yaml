@@ -1,0 +1,78 @@
+# Online Study System — eval environment.
+#
+# This file lives IN the sample: it is part of the pinned commit, and the
+# bench repo no longer knows how to start anything. `make pin` in the bench
+# repo points SAMPLE.commit_sha at a commit that contains this file.
+#
+# One host port is exported by the harness for every run, so concurrent
+# runs never collide:
+#   BENCH_HTTP_PORT   host port for the app   (default 8091)
+#
+# The database publishes nothing: the harness reaches it with
+# `docker compose exec db ...`, so `data` really is the only way in.
+#
+# Shape (bench repo: templates/compose.template.yaml):
+#   api    front <-> back
+#   data   back <-> db
+# At the pin `front` is on BOTH: the app is still server-rendered and reads
+# the database directly. Dropping `data` from `front` is the task, so do not
+# tidy it away here.
+name: online-study-system
+
+networks:
+  api: {}
+  data: {}
+
+services:
+  db:
+    image: mysql:5.7
+    networks:
+      - data
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: creates the schema + seed from the sample's tracked dump.
+  # Must complete before the app starts (the app's pool expects the tables).
+  schema:
+    image: mysql:5.7
+    networks:
+      - data
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./load-schema.sh:/load-schema.sh:ro
+      - ./sql:/sql:ro
+    entrypoint: ["bash", "/load-schema.sh"]
+
+  front:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - api
+      - data        # the task: remove this once the data side is extracted
+    depends_on:
+      db:
+        condition: service_healthy
+      schema:
+        condition: service_completed_successfully
+    ports:
+      - "${BENCH_HTTP_PORT:-8091}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null",
+             "http://localhost:8080/Examination_System/login.jsp"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+
+volumes:
+  db-data:
