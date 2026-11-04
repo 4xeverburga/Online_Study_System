@@ -62,7 +62,10 @@ redirects to `/Examination_System/login`. Tomcat's log is on stdout and in
 `classpath:mysql.properties` through the `context:property-placeholder` in
 `src/main/resources/spring/applicationContext-dao.xml`, which hands the
 values to a c3p0 pool; the driver is the MySQL connector the pom pins.
-Point `jdbc.url` at `db:3306` here before starting the app.
+
+The URL is pointed at `db:3306` and SSL is off: that connector asks for TLS
+1.0, which the JDK installed here no longer negotiates, so `useSSL=true`
+fails the handshake and every query with it.
 
 ## 5. The seeded accounts
 
