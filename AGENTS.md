@@ -1,91 +1,91 @@
-# AGENTS — Running Online_Study_System locally
+# AGENTS — Running Online_Study_System
 
-Online Study System is a Chinese-language online examination app (upstream:
-https://github.com/jitwxs/Online_Study_System, Apache 2.0 — see `UPSTREAM.md`).
-Stack: Spring MVC 4.3 + Shiro 1.2 + MyBatis-style DAO + JSP/JSTL, Java 8, Maven WAR.
+Online Study System is a Chinese-language course and examination app: a
+student enrols in courses, works through a course's periods and sits its
+exam; a teacher grades the students enrolled in a course; an administrator
+manages courses, students and teachers.
 
-This repo is a **full-history mirror** of upstream; tag `pristine` marks the
-adopted upstream HEAD. All sample work lands via PR into `main`.
+Stack: Spring MVC 4.3 + Shiro 1.2 + MyBatis-style DAO + JSP/JSTL, built as
+a Maven WAR. The sources are Java 7/8 and the toolchain installed here is
+JDK 8: nothing newer compiles or runs this stack.
 
----
-
-## 0. Prerequisites (absolute paths on this machine)
-
-| Thing | Path / command | Notes |
+| Thing | Where | Notes |
 |---|---|---|
-| **JDK 8** (mandatory) | `/usr/lib/jvm/jdk-8.0.202-oracle-x64` | Never inherit the shell `JAVA_HOME` (machine default is JDK 21). |
-| **Maven** | on `PATH` | |
-| **MySQL 5.7** | docker `samples-mysql` (see below) | The dump targets MySQL 5.7; do not use MySQL 8. |
-| **Tomcat 9** | `$TC_HOME` + shared samples base `$TC_BASE` | javax.servlet stack; Tomcat 10+ (jakarta) will NOT work. |
-
-```bash
-export JDK8=/usr/lib/jvm/jdk-8.0.202-oracle-x64
-export TC_HOME=/home/ever/tools/apache-tomcat-9.0.83
-export TC_BASE=/home/ever/tools/tomcat-samples-base
-```
-
-> `$TC_BASE` is shared by the three JSP samples (Online_Study_System,
-> shopping-cart, Javaweb_bookstore). HTTP port **8081**, shutdown port **8006**.
+| **JDK 8** | `JAVA_HOME`; `java`, `javac`, `jar` on the path | The app does not run on JDK 9+. |
+| **Maven** | `mvn` on the path | |
+| **Tomcat 9** | `$CATALINA_HOME` | `javax.servlet` (servlet 3.1); Tomcat 10+ moves to `jakarta.servlet` and will NOT work. |
+| **MySQL 5.7** | `db:3306` (see below) | The dump targets MySQL 5.7; do not use MySQL 8. |
 
 ---
 
-## 1. Quick start (copy-paste)
+## 1. The database
+
+MySQL 5.7 at `db:3306`, user `root`, password `root`, database
+`online_study_system`, already loaded with the schema and the seed rows of
+`sql/online_study_system.sql`. Use that host, not `localhost`: the server
+is not on this machine, only the `mysql` client is.
+
+Reloading the dump resets every table to its seeded state:
 
 ```bash
-# --- 1. MySQL 5.7 (root/root on localhost:3306) ------------------------------
-docker start samples-mysql 2>/dev/null || docker run -d --name samples-mysql \
-  -e MYSQL_ROOT_PASSWORD=root -p 3306:3306 mysql:5.7
-sleep 20   # first boot initializes the datadir
-
-# --- 2. Load the schema + seed (6 tables, utf8) ------------------------------
-docker exec -i samples-mysql mysql -uroot -proot --default-character-set=utf8 \
+mysql -h db -uroot -proot --default-character-set=utf8 \
   online_study_system < sql/online_study_system.sql
-# (create the db first if the container is brand new:
-#  docker exec samples-mysql mysql -uroot -proot \
-#    -e "CREATE DATABASE IF NOT EXISTS online_study_system CHARACTER SET utf8")
-
-# --- 3. Build the WAR (JDK 8) -------------------------------------------------
-JAVA_HOME=$JDK8 mvn -B clean package -DskipTests   # -> target/Examination_System.war
-
-# --- 4. Deploy + start Tomcat -------------------------------------------------
-cp target/Examination_System.war $TC_BASE/webapps/
-JAVA_HOME=$JDK8 CATALINA_HOME=$TC_HOME CATALINA_BASE=$TC_BASE \
-  $TC_HOME/bin/catalina.sh start
-
-# --- 5. Use it ---------------------------------------------------------------
-# http://localhost:8081/Examination_System/   (redirects to login.jsp)
 ```
 
-## 2. Verify
+## 2. Build
 
 ```bash
-curl -so /dev/null -w '%{http_code} %{time_total}s\n' \
-  http://localhost:8081/Examination_System/login.jsp   # 200 in < 1 s (warm)
+mvn -B -q package          # -> target/Examination_System.war
 ```
 
-Seeded logins (all passwords `123`, salted SHA-1 x1024 — see `SHA1Utils`):
+`-o` works offline once the dependencies are in `~/.m2`.
+
+## 3. Run
+
+The WAR's name is the context path, so it must be deployed as
+`Examination_System.war`:
+
+```bash
+rm -rf "$CATALINA_HOME/webapps/Examination_System"*
+cp target/Examination_System.war "$CATALINA_HOME/webapps/"
+"$CATALINA_HOME/bin/catalina.sh" run
+```
+
+The app answers on <http://localhost:8080/Examination_System/> and
+redirects to `/Examination_System/login`. Tomcat's log is on stdout and in
+`$CATALINA_HOME/logs/catalina.out`.
+
+## 4. The config the app reads
+
+`src/main/resources/mysql.properties` is the datasource — `jdbc.driver`,
+`jdbc.url`, `jdbc.username`, `jdbc.password`. Spring reads it as
+`classpath:mysql.properties` through the `context:property-placeholder` in
+`src/main/resources/spring/applicationContext-dao.xml`, which hands the
+values to a c3p0 pool; the driver is the MySQL connector the pom pins.
+Point `jdbc.url` at `db:3306` here before starting the app.
+
+## 5. The seeded accounts
+
+Every seeded account has the password `123`, stored as a salted SHA-1 run
+1024 times (`SHA1Utils`):
 
 | user | role |
 |---|---|
-| `admin` | 1 (admin) |
-| `李老师`, `张老师` | 2 (teacher) |
-| `小明` | 3 (student) |
+| `admin` | administrator |
+| `李老师`, `张老师`, `刘老师`, `曹老师` | teacher |
+| `小明`, `小红`, `小林` | student |
 
-DB config lives in `src/main/resources/mysql.properties`
-(`root/root@localhost:3306/online_study_system`) — matches the container above.
+`小明` is the student the seed gives credit and enrolments; `小红` and
+`小林` start with a balance of 0 and no course.
 
-## 3. Logs & teardown
+## 6. Quirks
 
-```bash
-tail -f $TC_BASE/logs/catalina.out
-JAVA_HOME=$JDK8 CATALINA_HOME=$TC_HOME CATALINA_BASE=$TC_BASE $TC_HOME/bin/catalina.sh stop
-```
+- The dump is UTF-8 and its `sex` column is one character wide, so a client
+  that connects as latin1 fails it with `Data too long for column 'sex'`.
+  Load it with `--default-character-set=utf8`.
+- Shiro keeps sessions in memory: restarting Tomcat signs everybody out.
+- `src/main/resources/log4j.properties` appends its files at `../logs`,
+  relative to the working directory; when that path is not writable log4j
+  says so on stderr and the app runs regardless.
+- `target/` is ignored, so a change there does not survive a fresh clone.
 
-## 4. Troubleshooting
-
-| Symptom | Cause / fix |
-|---|---|
-| `Data too long for column 'sex'` while loading the dump | Client charset was latin1 — load with `--default-character-set=utf8`. |
-| 404 on every URL | Tomcat running on JDK 9+ — restart with `JAVA_HOME=$JDK8`. |
-| Login always fails with 500 | MySQL down or wrong creds — check `mysql.properties` vs the container. |
-| Port 8081 busy | Another sample Tomcat instance running — check `$TC_BASE` shutdown port 8006. |
